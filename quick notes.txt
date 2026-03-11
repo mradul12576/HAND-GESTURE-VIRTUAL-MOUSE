@@ -1,0 +1,8 @@
+VIRTUAL MOUSE PRO: QUICK NOTES
+
+GESTURE GUIDE:
+- MOVE: Index Finger (Point and Move) -> Magenta Trail
+- LEFT CLICK: Index + Thumb Pinch -> Green Pulse
+- RIGHT CLICK: Middle + Thumb Pinch -> Red Pulse
+- SCROLL: Middle + Ring Finger (Join) -> Yellow Pulse
+- EXIT: Full Fist (Close all fingers) -> "EXITING" Status
