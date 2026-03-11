@@ -1,0 +1,9 @@
+VIRTUAL MOUSE PRO: GESTURE CONTROL PLAN
+
+| Action | Gesture | Visual Feedback |
+| :--- | :--- | :--- |
+| Move Cursor | Point your Index Finger and move it around. | Magenta Trail |
+| Left Click | Pinch Index + Thumb together quickly. | Green Pulse |
+| Right Click | Pinch Middle + Thumb together. | Red Pulse |
+| Scroll | Join Middle + Ring fingers together. | Yellow Pulse |
+| Close App | Make a Fist (close all fingers). | "EXITING" Status |
