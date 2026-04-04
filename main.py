@@ -1,3 +1,5 @@
+import tkinter as tk
+from PIL import Image, ImageTk
 import cv2
 import mediapipe as mp
 import pyautogui
@@ -10,179 +12,160 @@ from mediapipe.tasks.python import vision
 
 pyautogui.FAILSAFE = False
 
-# --- CONFIGURATION ---
+# --- MODEL SETUP ---
 MODEL_URL = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task"
-MODEL_PATH = os.path.join(os.path.dirname(__file__), "hand_tracker.task")
-CAM_WIDTH, CAM_HEIGHT = 640, 480
-SCREEN_WIDTH, SCREEN_HEIGHT = pyautogui.size()
-
-SMOOTH_FACTOR_SLOW = 7
-SMOOTH_FACTOR_FAST = 2
-SPEED_THRESHOLD = 15
-
-CLICK_THRESHOLD = 0.045
-SCROLL_THRESHOLD = 0.04
-DEBOUNCE_TIME = 0.3
-
-CLR_ACCENT = (255, 0, 255)
-CLR_SUCCESS = (0, 255, 127)
-CLR_BG = (30, 30, 30)
-CLR_TEXT = (240, 240, 240)
-
-# --- DOWNLOAD MODEL ---
+MODEL_PATH = "hand_tracker.task"
 if not os.path.exists(MODEL_PATH):
-    print("Downloading hand tracking model...")
-    response = requests.get(MODEL_URL)
-    response.raise_for_status()
+    print("Downloading model...")
+    r = requests.get(MODEL_URL)
     with open(MODEL_PATH, "wb") as f:
-        f.write(response.content)
+        f.write(r.content)
 
-# --- GLOBAL STATE ---
 latest_result = None
-
-
 def result_callback(result, output_image, timestamp_ms):
     global latest_result
     latest_result = result
 
-
-# --- INITIALIZE HAND TRACKER ---
 base_options = python.BaseOptions(model_asset_path=MODEL_PATH)
 options = vision.HandLandmarkerOptions(
     base_options=base_options,
     num_hands=1,
-    min_hand_detection_confidence=0.6,
     running_mode=vision.RunningMode.LIVE_STREAM,
     result_callback=result_callback,
 )
 landmarker = vision.HandLandmarker.create_from_options(options)
 
-
 def get_dist(p1, p2):
-    return np.sqrt((p1.x - p2.x) ** 2 + (p1.y - p2.y) ** 2)
+    return np.sqrt((p1.x - p2.x)**2 + (p1.y - p2.y)**2)
+
+# --- APP ---
+class VirtualMouseApp:
+    def __init__(self, root, bg_image_path):
+        self.root = root
+        self.root.title("Virtual Mouse Pro Dashboard")
+        self.root.geometry("950x700")
+        self.running = False
+        self.cap = None
+        self.last_click = 0
+
+        # --- Set background image ---
+        bg_img = Image.open(bg_image_path)
+        bg_img = bg_img.resize((950, 700))
+        self.bg_photo = ImageTk.PhotoImage(bg_img)
+        self.bg_label = tk.Label(root, image=self.bg_photo)
+        self.bg_label.place(x=0, y=0, relwidth=1, relheight=1)
+
+        # --- Foreground UI ---
+        # Title
+        tk.Label(root, text="🎮 Virtual Mouse Dashboard", font=("Arial", 20, "bold"),
+                 fg="#00FFFF", bg="#000000").place(x=20, y=20)
+
+        # Status
+        self.status = tk.Label(root, text="Status: Idle", font=("Arial", 14),
+                               fg="#00FF7F", bg="#000000")
+        self.status.place(x=20, y=60)
+
+        # Video frame
+        self.video_label = tk.Label(root, bg="black")
+        self.video_label.place(x=150, y=100, width=640, height=480)
+
+        # Buttons frame
+        self.btn_frame = tk.Frame(root, bg="#000000")
+        self.btn_frame.place(x=150, y=600)
+
+        # Buttons
+        self.start_btn = self.create_button("▶ Start", "#4CAF50", self.start)
+        self.start_btn.grid(row=0, column=0, padx=20)
+
+        self.stop_btn = self.create_button("⏹ Stop", "#FF8C00", self.stop)
+        self.stop_btn.grid(row=0, column=1, padx=20)
+
+        self.exit_btn = self.create_button("❌ Exit", "#FF3333", self.exit_app)
+        self.exit_btn.grid(row=0, column=2, padx=20)
+
+    # Button creator with hover & click effect
+    def create_button(self, text, color, command):
+        btn = tk.Button(self.btn_frame, text=text, bg=color, fg="white",
+                        font=("Arial", 14, "bold"), width=12, height=2,
+                        relief="flat", activebackground="white", activeforeground=color,
+                        command=command)
+        # Hover effect
+        btn.bind("<Enter>", lambda e: btn.config(bg="white", fg=color))
+        btn.bind("<Leave>", lambda e: btn.config(bg=color, fg="white"))
+        # Click animation
+        btn.bind("<ButtonPress>", lambda e: btn.config(relief="sunken"))
+        btn.bind("<ButtonRelease>", lambda e: btn.config(relief="flat"))
+        return btn
+
+    # Start camera
+    def start(self):
+        if not self.running:
+            self.running = True
+            self.cap = cv2.VideoCapture(0)
+            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            self.process()
+
+    # Stop camera
+    def stop(self):
+        self.running = False
+        if self.cap:
+            self.cap.release()
+            self.cap = None
+        self.status.config(text="Status: Stopped")
+
+    # Exit app
+    def exit_app(self):
+        self.stop()
+        self.root.quit()
+        self.root.destroy()
+
+    # Main loop
+    def process(self):
+        if not self.running or not self.cap:
+            return
+
+        ret, frame = self.cap.read()
+        if not ret:
+            return
+
+        frame = cv2.flip(frame, 1)
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+        landmarker.detect_async(mp_image, int(time.time() * 1000))
+
+        if latest_result and latest_result.hand_landmarks:
+            for landmarks in latest_result.hand_landmarks:
+                index = landmarks[8]
+                thumb = landmarks[4]
+
+                screen_w, screen_h = pyautogui.size()
+                x = np.interp(index.x, (0, 1), (0, screen_w))
+                y = np.interp(index.y, (0, 1), (0, screen_h))
+
+                pyautogui.moveTo(x, y)
+                self.status.config(text="Status: Moving")
+
+                if get_dist(index, thumb) < 0.05:
+                    if time.time() - self.last_click > 0.3:
+                        pyautogui.click()
+                        self.last_click = time.time()
+                        self.status.config(text="Status: Click")
+
+        img = Image.fromarray(rgb)
+        imgtk = ImageTk.PhotoImage(image=img)
+        self.video_label.imgtk = imgtk
+        self.video_label.configure(image=imgtk)
+
+        self.root.after(10, self.process)
 
 
-def draw_hud(img, action, fps):
-    cv2.rectangle(img, (10, 10), (260, 110), CLR_BG, -1)
-    cv2.rectangle(img, (10, 10), (260, 110), (100, 100, 100), 1)
-
-    cv2.putText(img, "VIRTUAL MOUSE PRO", (20, 35), cv2.FONT_HERSHEY_DUPLEX, 0.6, CLR_ACCENT, 1)
-    cv2.line(img, (20, 45), (250, 45), (60, 60, 60), 1)
-
-    cv2.putText(img, f"STATUS: {action}", (20, 75), cv2.FONT_HERSHEY_SIMPLEX, 0.5, CLR_TEXT, 1)
-    cv2.putText(img, f"ENGINE: {int(fps)} FPS", (20, 95), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (150, 150, 150), 1)
-
-
-cap = cv2.VideoCapture(0)
-cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAM_WIDTH)
-cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAM_HEIGHT)
-
-prev_x, prev_y = 0, 0
-last_click_time = 0
-fps_time = time.time()
-last_action = "IDLE"
-trail_points = []
-
-print("VIRTUAL MOUSE PRO: RUNNING")
-
-while cap.isOpened():
-    success, img = cap.read()
-    if not success:
-        break
-
-    img = cv2.flip(img, 1)
-    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=img_rgb)
-    landmarker.detect_async(mp_image, int(time.time() * 1000))
-
-    if latest_result and latest_result.hand_landmarks:
-        for landmarks in latest_result.hand_landmarks:
-            thumb = landmarks[4]
-            index = landmarks[8]
-            middle = landmarks[12]
-            ring = landmarks[16]
-            pinky = landmarks[20]
-
-            ix = np.interp(index.x, (0.2, 0.8), (0, SCREEN_WIDTH))
-            iy = np.interp(index.y, (0.2, 0.8), (0, SCREEN_HEIGHT))
-
-            move_dist = np.sqrt((ix - prev_x) ** 2 + (iy - prev_y) ** 2)
-            smoothing = np.interp(
-                move_dist,
-                (0, SPEED_THRESHOLD),
-                (SMOOTH_FACTOR_SLOW, SMOOTH_FACTOR_FAST),
-            )
-
-            curr_x = prev_x + (ix - prev_x) / smoothing
-            curr_y = prev_y + (iy - prev_y) / smoothing
-
-            pyautogui.moveTo(curr_x, curr_y)
-            prev_x, prev_y = curr_x, curr_y
-            last_action = "MOVING"
-
-            cx, cy = int(index.x * CAM_WIDTH), int(index.y * CAM_HEIGHT)
-            trail_points.append((cx, cy))
-            if len(trail_points) > 10:
-                trail_points.pop(0)
-
-            for i in range(1, len(trail_points)):
-                thickness = int(np.sqrt(10 / float(i + 1)) * 2)
-                cv2.line(img, trail_points[i - 1], trail_points[i], CLR_ACCENT, thickness)
-
-            if get_dist(index, thumb) < CLICK_THRESHOLD:
-                if time.time() - last_click_time > DEBOUNCE_TIME:
-                    pyautogui.click()
-                    last_click_time = time.time()
-                    last_action = "L-CLICK"
-                cv2.circle(img, (cx, cy), 25, CLR_SUCCESS, 2)
-                cv2.circle(img, (cx, cy), 15, CLR_SUCCESS, -1)
-
-            elif get_dist(middle, thumb) < CLICK_THRESHOLD:
-                if time.time() - last_click_time > DEBOUNCE_TIME:
-                    pyautogui.rightClick()
-                    last_click_time = time.time()
-                    last_action = "R-CLICK"
-                cv2.circle(
-                    img,
-                    (int(middle.x * CAM_WIDTH), int(middle.y * CAM_HEIGHT)),
-                    25,
-                    (255, 50, 50),
-                    2,
-                )
-
-            elif get_dist(middle, ring) < SCROLL_THRESHOLD:
-                scroll = 40 if middle.y < 0.5 else -40
-                pyautogui.scroll(scroll)
-                last_action = "SCROLLING"
-                cv2.circle(
-                    img,
-                    (int(middle.x * CAM_WIDTH), int(middle.y * CAM_HEIGHT)),
-                    20,
-                    (255, 255, 0),
-                    2,
-                )
-
-            elif get_dist(thumb, pinky) < 0.04 and get_dist(index, pinky) < 0.04:
-                last_action = "EXITING"
-                cap.release()
-                cv2.destroyAllWindows()
-                raise SystemExit
-
-            else:
-                cv2.circle(img, (cx, cy), 10, CLR_ACCENT, -1)
-                cv2.circle(img, (cx, cy), 14, CLR_ACCENT, 1)
-
-    fps = 1 / (time.time() - fps_time + 1e-6)
-    fps_time = time.time()
-    draw_hud(img, last_action, fps)
-
-    x1, y1 = int(0.2 * CAM_WIDTH), int(0.2 * CAM_HEIGHT)
-    x2, y2 = int(0.8 * CAM_WIDTH), int(0.8 * CAM_HEIGHT)
-    cv2.rectangle(img, (x1, y1), (x2, y2), CLR_ACCENT, 1)
-
-    cv2.imshow("Virtual Mouse Pro", img)
-    if cv2.waitKey(1) & 0xFF == ord("q"):
-        break
-
-cap.release()
-cv2.destroyAllWindows()
+# --- RUN APP ---
+root = tk.Tk()
+# Replace 'background.png' with your image path
+app = VirtualMouseApp(root, bg_image_path=r"C:\\Users\\User\\Downloads\\hand move.png")
+try:
+    root.mainloop()
+except KeyboardInterrupt:
+    print("App closed safely")
